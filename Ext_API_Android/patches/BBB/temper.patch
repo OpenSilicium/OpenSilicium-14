@@ -1,0 +1,407 @@
+
+project frameworks/base/
+diff --git a/Android.mk b/Android.mk
+index 151621c..592bd05 100644
+--- a/Android.mk
++++ b/Android.mk
+@@ -150,6 +150,7 @@ LOCAL_SRC_FILES += \
+ 	core/java/android/os/IUpdateLock.aidl \
+ 	core/java/android/os/IUserManager.aidl \
+ 	core/java/android/os/IVibratorService.aidl \
++	core/java/android/os/ITemperService.aidl \
+ 	core/java/android/service/notification/INotificationListener.aidl \
+ 	core/java/android/service/dreams/IDreamManager.aidl \
+ 	core/java/android/service/dreams/IDreamService.aidl \
+diff --git a/core/java/android/app/ContextImpl.java b/core/java/android/app/ContextImpl.java
+index 3fc82fa..59550c4 100644
+--- a/core/java/android/app/ContextImpl.java
++++ b/core/java/android/app/ContextImpl.java
+@@ -90,6 +90,8 @@ import android.os.UserHandle;
+ import android.os.SystemVibrator;
+ import android.os.UserManager;
+ import android.os.storage.StorageManager;
++import android.os.ITemperService;
++import android.os.TemperManager;
+ import android.telephony.TelephonyManager;
+ import android.content.ClipboardManager;
+ import android.util.AndroidRuntimeException;
+@@ -355,6 +357,13 @@ class ContextImpl extends Context {
+                     return new NfcManager(ctx);
+                 }});
+ 
++	registerService(TEMPER_SERVICE, new ServiceFetcher() {
++                public Object createService(ContextImpl ctx) {
++                    IBinder b = ServiceManager.getService(TEMPER_SERVICE);
++                    ITemperService service = ITemperService.Stub.asInterface(b);
++                    return new TemperManager(service);
++                }});
++
+         registerService(DROPBOX_SERVICE, new StaticServiceFetcher() {
+                 public Object createStaticService() {
+                     return createDropBoxManager();
+diff --git a/core/java/android/content/Context.java b/core/java/android/content/Context.java
+index 5bd28b9..20a6990 100644
+--- a/core/java/android/content/Context.java
++++ b/core/java/android/content/Context.java
+@@ -48,9 +48,9 @@ import java.io.InputStream;
+ import java.util.List;
+ 
+ /**
+- * Interface to global information about an application environment.  This is
++ * Interface to global information about an application environment. This is
+  * an abstract class whose implementation is provided by
+- * the Android system.  It
++ * the Android system. It
+  * allows access to application-specific resources and classes, as well as
+  * up-calls for application-level operations such as launching activities,
+  * broadcasting and receiving intents, etc.
+@@ -2197,6 +2197,14 @@ public abstract class Context {
+ 
+     /**
+      * Use with {@link #getSystemService} to retrieve a
++     * {@link android.os.TemperManager} for using Temper Service.
++     *
++     * @see #getSystemService
++     */
++    public static final String TEMPER_SERVICE = "temper";
++
++    /**
++     * Use with {@link #getSystemService} to retrieve a
+      * {@link android.bluetooth.BluetoothAdapter} for using Bluetooth.
+      *
+      * @see #getSystemService
+diff --git a/core/java/android/os/ITemperService.aidl b/core/java/android/os/ITemperService.aidl
+new file mode 100644
+index 0000000..8dbe174
+--- /dev/null
++++ b/core/java/android/os/ITemperService.aidl
+@@ -0,0 +1,25 @@
++/*
++ * Copyright (C) 2014 Openwide.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ *
++ */
++
++package android.os;
++
++interface ITemperService{
++	/**
++	* {@hide}
++	*/
++	String read(int maxLength);
++}
+diff --git a/core/java/android/os/TemperManager.java b/core/java/android/os/TemperManager.java
+new file mode 100644
+index 0000000..91a17fd
+--- /dev/null
++++ b/core/java/android/os/TemperManager.java
+@@ -0,0 +1,38 @@
++/*
++ * Copyright (C) 2014 Openwide.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package android.os;
++
++import android.os.ITemperService;
++import android.util.Log;
++
++public class TemperManager{
++	private static final String TAG = "TemperManager";
++	private final ITemperService mService;
++
++	public String read (int maxLength){
++		try {
++			return mService.read(maxLength);
++		} catch (RemoteException e){
++			Log.e(TAG, "RemoteExecption in read: ", e);
++			return null;
++		}
++	}
++
++	public TemperManager(ITemperService service){
++		mService = service;
++	}
++}
+diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
+index 9455017..dd764c2 100644
+--- a/services/java/com/android/server/SystemServer.java
++++ b/services/java/com/android/server/SystemServer.java
+@@ -749,6 +749,14 @@ class ServerThread extends Thread {
+             } catch (Throwable e) {
+                 reportWtf("starting IdleMaintenanceService", e);
+             }
++
++	try {
++                Slog.i(TAG, "Temper Service");
++                ServiceManager.addService(Context.TEMPER_SERVICE, new TemperService(context));
++            } catch (Throwable e) {
++                Slog.e(TAG, "Failure starting TemperService service", e);
++            }
++
+         }
+ 
+         // Before things start rolling, be sure we have decided whether
+diff --git a/services/java/com/android/server/TemperService.java b/services/java/com/android/server/TemperService.java
+new file mode 100644
+index 0000000..bfbfd12
+--- /dev/null
++++ b/services/java/com/android/server/TemperService.java
+@@ -0,0 +1,59 @@
++/*
++ * Copyright (C) 2014 Openwide.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.server;
++
++import android.content.Context;
++import android.os.Handler;
++import android.os.ITemperService;
++import android.os.Message;
++import android.os.Looper;
++import android.os.Process;
++import android.util.Log;
++
++public class TemperService extends ITemperService.Stub {
++	private static final String TAG = "TemperService";
++	private Context mContext;
++	private int mNativePointer;
++
++	public TemperService(Context context){
++		super();
++		mContext = context;
++		Log.i(TAG, "Temper Service started");
++
++		mNativePointer = init_native();
++		
++		Log.i(TAG, "test() returns "+ test_native(mNativePointer, 20));
++	}
++
++	protected void finalize() throws Throwable {
++		finalize_native(mNativePointer);
++		super.finalize();
++	}
++
++	public String read(int maxLength) {
++		int length;
++		byte[] buffer = new byte[maxLength];
++
++		length = read_native(mNativePointer, buffer);
++		return new String(buffer, 0, length);
++	}
++
++	private static native int init_native();
++	private static native void finalize_native(int ptr);
++	private static native int read_native(int ptr, byte[] buffer);
++	private static native int test_native(int ptr, int value);
++}
+diff --git a/services/jni/Android.mk b/services/jni/Android.mk
+index b313d48..20f7e92 100644
+--- a/services/jni/Android.mk
++++ b/services/jni/Android.mk
+@@ -16,6 +16,7 @@ LOCAL_SRC_FILES:= \
+     com_android_server_VibratorService.cpp \
+     com_android_server_location_GpsLocationProvider.cpp \
+     com_android_server_connectivity_Vpn.cpp \
++    com_android_server_TemperService.cpp \
+     onload.cpp
+ 
+ LOCAL_C_INCLUDES += \
+diff --git a/services/jni/com_android_server_TemperService.cpp b/services/jni/com_android_server_TemperService.cpp
+new file mode 100644
+index 0000000..2189270
+--- /dev/null
++++ b/services/jni/com_android_server_TemperService.cpp
+@@ -0,0 +1,107 @@
++/*
++ * Copyright (C) 2014 Openwide.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#define LOG_TAG "TemperService"
++
++#include "jni.h"
++#include "JNIHelp.h"
++#include "android_runtime/AndroidRuntime.h"
++
++#include <utils/misc.h>
++#include <utils/Log.h>
++#include <hardware/hardware.h>
++#include <hardware/temperhw.h>
++
++#include <stdio.h>
++
++namespace android
++{
++
++	temperhw_device_t* temperhw_dev;
++
++	static jint init_native(JNIEnv * env, jobject clazz)
++	{
++		int err;
++		hw_module_t* module;
++		temperhw_device_t* dev = NULL;
++
++		err = hw_get_module(TEMPERHW_HARDWARE_MODULE_ID, (hw_module_t const**)&module);
++		if (err == 0)
++		{
++			if (module->methods->open(module, "", ((hw_device_t**) &dev)) != 0){
++				return 0;
++			}
++		}
++
++		return (jint)dev;	
++	}
++
++	static void finalize_native(JNIEnv *env, jobject clazz, int ptr)
++	{
++		temperhw_device_t* dev = (temperhw_device_t*)ptr;
++
++		if (dev == NULL) 
++		{
++			return;
++		}
++
++		free(dev);
++	}
++
++	static int read_native(JNIEnv *env, jobject clazz, int ptr, jbyteArray buffer)
++	{
++		temperhw_device_t* dev = (temperhw_device_t*)ptr;
++		jbyte* real_byte_array;
++		int length;
++
++		real_byte_array = env->GetByteArrayElements(buffer, NULL);
++
++		if (dev == NULL)
++		{
++			return 0;
++		}
++
++		length = dev->read((char*)real_byte_array, env->GetArrayLength(buffer));
++		env->ReleaseByteArrayElements(buffer, real_byte_array, 0);
++
++		return length;
++	}
++
++	static int test_native(JNIEnv * env, jobject clazz, int ptr, int value)
++	{
++		temperhw_device_t* dev = (temperhw_device_t*)ptr;
++
++		if(dev == NULL)
++		{
++			return 0;
++		}
++
++		return dev->test(value);
++	}
++
++	static JNINativeMethod method_table[] = {
++		{ "init_native", "()I", (void*)init_native },
++		{ "finalize_native", "(I)V", (void*)finalize_native },
++		{ "read_native", "(I[B)I", (void*)read_native },
++		{ "test_native", "(II)I", (void*)test_native},
++	};
++
++	int register_android_server_TemperService(JNIEnv * env)
++	{
++		return jniRegisterNativeMethods(env, "com/android/server/TemperService", method_table, NELEM(method_table));
++	};
++
++};
+diff --git a/services/jni/onload.cpp b/services/jni/onload.cpp
+index 423ebd1..bbc0c6b 100644
+--- a/services/jni/onload.cpp
++++ b/services/jni/onload.cpp
+@@ -34,6 +34,7 @@ int register_android_server_VibratorService(JNIEnv* env);
+ int register_android_server_SystemServer(JNIEnv* env);
+ int register_android_server_location_GpsLocationProvider(JNIEnv* env);
+ int register_android_server_connectivity_Vpn(JNIEnv* env);
++int register_android_server_TemperService(JNIEnv* env);
+ };
+ 
+ using namespace android;
+@@ -63,6 +64,7 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved)
+     register_android_server_SystemServer(env);
+     register_android_server_location_GpsLocationProvider(env);
+     register_android_server_connectivity_Vpn(env);
++	register_android_server_TemperService(env);
+ 
+     return JNI_VERSION_1_4;
+ }
+
+project hardware/libhardware/
+diff --git a/include/hardware/temperhw.h b/include/hardware/temperhw.h
+new file mode 100644
+index 0000000..4960ee8
+--- /dev/null
++++ b/include/hardware/temperhw.h
+@@ -0,0 +1,23 @@
++#ifndef ANDROID_TEMPERHW_INTERFACE_H
++#define ANDROID_TEMPERHW_INTERFACE_H
++
++#include <stdint.h>
++#include <sys/cdefs.h>
++#include <sys/types.h>
++
++#include <hardware/hardware.h>
++
++__BEGIN_DECLS
++
++#define TEMPERHW_HARDWARE_MODULE_ID "temperhw"
++
++struct temperhw_device_t {
++	struct hw_device_t common;
++
++	int (*read)(char* buffer, int length);
++	int (*test)(int value);
++};
++
++__END_DECLS
++
++#endif // ANDROID_TEMPERHW_INTERFACE_H

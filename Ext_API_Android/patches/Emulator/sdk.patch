@@ -1,0 +1,143 @@
+diff --git a/emulator/temperhw/Android.mk b/emulator/temperhw/Android.mk
+new file mode 100644
+index 0000000..3d956aa
+--- /dev/null
++++ b/emulator/temperhw/Android.mk
+@@ -0,0 +1,30 @@
++# Copyright (C) 2010 The Android Open Source Project
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#      http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++
++LOCAL_PATH := $(call my-dir)
++
++ifneq ($(TARGET_PRODUCT),sim)
++# HAL module implemenation, not prelinked and stored in
++# hw/<GPS_HARDWARE_MODULE_ID>.<ro.hardware>.so
++include $(CLEAR_VARS)
++LOCAL_PRELINK_MODULE := false
++LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
++LOCAL_CFLAGS += -DQEMU_HARDWARE
++LOCAL_SHARED_LIBRARIES := liblog libcutils libhardware
++LOCAL_SRC_FILES := temperhw_qemu.c
++LOCAL_MODULE := temperhw.goldfish
++LOCAL_MODULE_TAGS := debug
++include $(BUILD_SHARED_LIBRARY)
++endif
+diff --git a/emulator/temperhw/temperhw_qemu.c b/emulator/temperhw/temperhw_qemu.c
+new file mode 100644
+index 0000000..4760470
+--- /dev/null
++++ b/emulator/temperhw/temperhw_qemu.c
+@@ -0,0 +1,101 @@
++/*
++ *  Copyright (C) 2014 Open Wide
++ *
++ *  Licensed under the Apache License, Version 2.0 (the "License");
++ *  you may not use this file except in compliance with the License.
++ *  You may obtain a copy of the License at
++ *
++ *  http://www.apache.org/licenses/LICENSE-2.0
++ *
++ *  Unless required by applicable law or agreed to in writing, software
++ *  distributed under the License is distributed on an "AS IS" BASIS,
++ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ *  See the License for the specific language governing permissions and
++ *  limitations under the License.
++ */
++
++
++#define LOG_TAG "temperhw_qemu"
++
++#include <cutils/sockets.h>
++#include <stdint.h>
++#include <string.h>
++#include <unistd.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <pthread.h>
++
++#include <sys/ioctl.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <cutils/log.h>
++
++#include <hardware/temperhw.h>
++
++int temperhw__read(char* buffer, int length)
++{
++  int retval, fd;
++
++  /*
++   * we do something like "cat /dev/temper0" (open/read/close)
++   */
++  fd = open("/dev/temper0", O_RDONLY);
++
++  if (fd < 0) {
++    ALOGI("Failed to open device!\n");
++    return -1;
++  }
++
++  ALOGI("Temper HW - read() for %d bytes called", length);
++  retval = read(fd, buffer, length);
++  ALOGI("Temper HW - read() = %s %d\n", buffer, retval);
++
++  close(fd);
++
++  return retval;
++}
++
++int temperhw__test(int value)
++{
++  return value;
++}
++
++static int close_temperhw(struct temperhw_device_t *dev){
++  ALOGI("close_temperhw\n");
++
++  if (dev)
++    free(dev);
++  return 0;
++}
++
++static int open_temperhw(const struct hw_module_t* module, char const* name, struct hw_device_t** device)
++{
++  struct temperhw_device_t *dev = malloc(sizeof(struct temperhw_device_t));
++  memset(dev, 0, sizeof(*dev));
++
++  ALOGI("open_temperhw\n");
++
++  dev->common.tag = HARDWARE_DEVICE_TAG;
++  dev->common.version = 0;
++  dev->common.module = (struct hw_module_t*)module;
++  dev->common.close = (int (*)(struct hw_device_t *))close_temperhw;
++  dev->read = temperhw__read;
++  dev->test = temperhw__test;
++  *device = (struct hw_device_t*) dev;
++
++  return 0;
++}
++
++static struct hw_module_methods_t temperhw_module_methods = {
++  .open = open_temperhw
++};
++
++struct hw_module_t HAL_MODULE_INFO_SYM = {
++  .tag = HARDWARE_MODULE_TAG,
++  .version_major = 1,
++  .version_minor = 0,
++  .id = TEMPERHW_HARDWARE_MODULE_ID,
++  .name = "Temper HW Module",
++  .author = "Open Wide",
++  .methods = &temperhw_module_methods,
++};

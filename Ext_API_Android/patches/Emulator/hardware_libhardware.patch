@@ -1,0 +1,29 @@
+diff --git a/include/hardware/temperhw.h b/include/hardware/temperhw.h
+new file mode 100644
+index 0000000..4960ee8
+--- /dev/null
++++ b/include/hardware/temperhw.h
+@@ -0,0 +1,23 @@
++#ifndef ANDROID_TEMPERHW_INTERFACE_H
++#define ANDROID_TEMPERHW_INTERFACE_H
++
++#include <stdint.h>
++#include <sys/cdefs.h>
++#include <sys/types.h>
++
++#include <hardware/hardware.h>
++
++__BEGIN_DECLS
++
++#define TEMPERHW_HARDWARE_MODULE_ID "temperhw"
++
++struct temperhw_device_t {
++	struct hw_device_t common;
++
++	int (*read)(char* buffer, int length);
++	int (*test)(int value);
++};
++
++__END_DECLS
++
++#endif // ANDROID_TEMPERHW_INTERFACE_H
